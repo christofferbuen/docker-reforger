@@ -8,281 +8,236 @@ import subprocess
 import sys
 from pathlib import Path
 
-# On SIGTERM, raise KeyboardInterrupt instead of exiting abruptly.
 signal.signal(signal.SIGTERM, signal.default_int_handler)
 
 CONFIG_GENERATED = "/reforger/Configs/docker_generated.json"
+SENTINEL_WINDOWS_FIX = "/reforger/.windows_fix_done"
+
+
+def env(key, default=""):
+    return os.environ.get(key, default)
 
 
 def env_defined(key):
-    return key in os.environ and len(os.environ[key]) > 0
-
-
-def random_passphrase():
-    password = "'"
-    while "'" in password:
-        with open("/usr/share/dict/american-english") as f:
-            words = f.readlines()
-        password = "-".join(random.sample(words, 2)).replace("\n", "").lower()
-    return password
+    return bool(os.environ.get(key))
 
 
 def bool_str(text):
     return text.lower() == "true"
 
 
-SENTINEL_WINDOWS_FIX = "/reforger/.windows_fix_done"
+def random_passphrase():
+    with open("/usr/share/dict/american-english") as f:
+        words = [w.strip().lower() for w in f if "'" not in w]
+    return "-".join(random.sample(words, 2))
 
-# Clear Windows fix sentinel if switching away from experimental appId
-if Path(SENTINEL_WINDOWS_FIX).exists() and os.environ["STEAM_APPID"] != "1890870":
-    Path(SENTINEL_WINDOWS_FIX).unlink()
 
-if os.environ["SKIP_INSTALL"] in ["", "false"]:
-    # Special handling for experimental appId 1890870
-    if os.environ["STEAM_APPID"] == "1890870":
-        # We only need the Windows pass once to work around this bug. On subsequent
-        # launches just perform the normal Linux update so we don't waste bandwidth.
-        run_windows_pass = not Path(SENTINEL_WINDOWS_FIX).exists()
+def build_steamcmd_args(platform=None):
+    """Build steamcmd argument list for server install/update."""
+    args = ["/steamcmd/steamcmd.sh", "+force_install_dir", "/reforger"]
+    if env_defined("STEAM_USER"):
+        args.extend(["+login", env("STEAM_USER"), env("STEAM_PASSWORD")])
+    else:
+        args.extend(["+login", "anonymous"])
+    if platform:
+        args.extend(["+@sSteamCmdForcePlatformType", platform])
+    args.extend(["+app_update", env("STEAM_APPID")])
+    if env_defined("STEAM_BRANCH"):
+        args.extend(["-beta", env("STEAM_BRANCH")])
+    if env_defined("STEAM_BRANCH_PASSWORD"):
+        args.extend(["-betapassword", env("STEAM_BRANCH_PASSWORD")])
+    args.extend(["validate", "+quit"])
+    return args
 
+
+def install_server():
+    """Download/update the server via steamcmd."""
+    if env("SKIP_INSTALL", "false").lower() in ("true", "1"):
+        return
+
+    app_id = env("STEAM_APPID")
+    sentinel = Path(SENTINEL_WINDOWS_FIX)
+
+    if app_id == "1890870":
+        # Experimental appId needs a one-time Windows platform pass to work
+        # around a bug. On subsequent launches just do the normal Linux update.
         subprocess.call(["/steamcmd/steamcmd.sh", "+login", "anonymous", "+quit"])
-
-        if run_windows_pass:
-            steamcmd_win = ["/steamcmd/steamcmd.sh"]
-            steamcmd_win.extend(["+force_install_dir", "/reforger"])
-            if env_defined("STEAM_USER"):
-                steamcmd_win.extend(
-                    ["+login", os.environ["STEAM_USER"], os.environ["STEAM_PASSWORD"]]
-                )
-            else:
-                steamcmd_win.extend(["+login", "anonymous"])
-            steamcmd_win.extend(["+@sSteamCmdForcePlatformType", "windows"])
-            steamcmd_win.extend(["+app_update", os.environ["STEAM_APPID"]])
-            if env_defined("STEAM_BRANCH"):
-                steamcmd_win.extend(["-beta", os.environ["STEAM_BRANCH"]])
-            if env_defined("STEAM_BRANCH_PASSWORD"):
-                steamcmd_win.extend(
-                    ["-betapassword", os.environ["STEAM_BRANCH_PASSWORD"]]
-                )
-            steamcmd_win.extend(["validate", "+quit"])
-            subprocess.call(steamcmd_win)
-            Path(SENTINEL_WINDOWS_FIX).touch()
-
-        # Install with Linux platform
-        steamcmd_linux = ["/steamcmd/steamcmd.sh"]
-        steamcmd_linux.extend(["+force_install_dir", "/reforger"])
-        if env_defined("STEAM_USER"):
-            steamcmd_linux.extend(
-                ["+login", os.environ["STEAM_USER"], os.environ["STEAM_PASSWORD"]]
-            )
-        else:
-            steamcmd_linux.extend(["+login", "anonymous"])
-        steamcmd_linux.extend(["+@sSteamCmdForcePlatformType", "linux"])
-        steamcmd_linux.extend(["+app_update", os.environ["STEAM_APPID"]])
-        if env_defined("STEAM_BRANCH"):
-            steamcmd_linux.extend(["-beta", os.environ["STEAM_BRANCH"]])
-        if env_defined("STEAM_BRANCH_PASSWORD"):
-            steamcmd_linux.extend(
-                ["-betapassword", os.environ["STEAM_BRANCH_PASSWORD"]]
-            )
-        steamcmd_linux.extend(["validate", "+quit"])
-        subprocess.call(steamcmd_linux)
+        if not sentinel.exists():
+            subprocess.call(build_steamcmd_args(platform="windows"))
+            sentinel.touch()
+        subprocess.call(build_steamcmd_args(platform="linux"))
     else:
-        # Standard installation for other appIds
-        steamcmd = ["/steamcmd/steamcmd.sh"]
-        steamcmd.extend(["+force_install_dir", "/reforger"])
-        if env_defined("STEAM_USER"):
-            steamcmd.extend(
-                ["+login", os.environ["STEAM_USER"], os.environ["STEAM_PASSWORD"]]
-            )
-        else:
-            steamcmd.extend(["+login", "anonymous"])
-        steamcmd.extend(["+app_update", os.environ["STEAM_APPID"]])
-        if env_defined("STEAM_BRANCH"):
-            steamcmd.extend(["-beta", os.environ["STEAM_BRANCH"]])
-        if env_defined("STEAM_BRANCH_PASSWORD"):
-            steamcmd.extend(["-betapassword", os.environ["STEAM_BRANCH_PASSWORD"]])
-        steamcmd.extend(["validate", "+quit"])
-        subprocess.call(steamcmd)
+        if sentinel.exists():
+            sentinel.unlink()
+        subprocess.call(build_steamcmd_args())
 
-if os.environ["ARMA_CONFIG"] != "docker_generated":
-    config_path = f"/reforger/Configs/{os.environ['ARMA_CONFIG']}"
-else:
-    if os.path.exists(CONFIG_GENERATED):
-        f = open(CONFIG_GENERATED)
-        config = json.load(f)
-        f.close()
-    else:
-        f = open("/docker_default.json")
-        config = json.load(f)
-        f.close()
 
+def load_config():
+    """Load existing generated config, or fall back to defaults."""
+    path = CONFIG_GENERATED if os.path.exists(CONFIG_GENERATED) else "/docker_default.json"
+    with open(path) as f:
+        return json.load(f)
+
+
+def parse_mods(game):
+    """Build the mod list from GAME_MODS_IDS_LIST and GAME_MODS_JSON_FILE_PATH."""
+    game["mods"] = []
+    seen_ids = set()
+
+    if env_defined("GAME_MODS_IDS_LIST"):
+        mods_str = env("GAME_MODS_IDS_LIST")
+        if not re.fullmatch(r"[A-Z\d,=.]+", mods_str):
+            raise ValueError("Illegal characters in GAME_MODS_IDS_LIST")
+        version_re = re.compile(r"^\d+\.\d+\.\d+$")
+        for entry in filter(None, mods_str.split(",")):
+            parts = entry.split("=")
+            if len(parts) not in (1, 2):
+                raise ValueError(f"Mod '{entry}' not defined properly")
+            mod_id = parts[0]
+            if mod_id in seen_ids:
+                continue
+            mod = {"modId": mod_id}
+            if len(parts) == 2:
+                if not version_re.match(parts[1]):
+                    raise ValueError(f"Mod '{entry}' version doesn't match X.Y.Z")
+                mod["version"] = parts[1]
+            seen_ids.add(mod_id)
+            game["mods"].append(mod)
+
+    if env_defined("GAME_MODS_JSON_FILE_PATH"):
+        with open(env("GAME_MODS_JSON_FILE_PATH")) as f:
+            json_mods = json.load(f)
+        allowed_keys = {"modId", "name", "version"}
+        for entry in json_mods:
+            if "modId" not in entry:
+                raise ValueError(f"Mod entry missing modId: {entry}")
+            if entry["modId"] in seen_ids:
+                continue
+            seen_ids.add(entry["modId"])
+            game["mods"].append({k: v for k, v in entry.items() if k in allowed_keys})
+
+
+def apply_env_to_config(config):
+    """Overwrite config values from environment variables."""
+    # Network
     if env_defined("SERVER_BIND_ADDRESS"):
-        config["bindAddress"] = os.environ["SERVER_BIND_ADDRESS"]
+        config["bindAddress"] = env("SERVER_BIND_ADDRESS")
     if env_defined("SERVER_BIND_PORT"):
-        config["bindPort"] = int(os.environ["SERVER_BIND_PORT"])
+        config["bindPort"] = int(env("SERVER_BIND_PORT"))
     if env_defined("SERVER_PUBLIC_ADDRESS"):
-        config["publicAddress"] = os.environ["SERVER_PUBLIC_ADDRESS"]
+        config["publicAddress"] = env("SERVER_PUBLIC_ADDRESS")
     if env_defined("SERVER_PUBLIC_PORT"):
-        config["publicPort"] = int(os.environ["SERVER_PUBLIC_PORT"])
+        config["publicPort"] = int(env("SERVER_PUBLIC_PORT"))
+
+    # A2S
     if env_defined("SERVER_A2S_ADDRESS") and env_defined("SERVER_A2S_PORT"):
         config["a2s"] = {
-            "address": os.environ["SERVER_A2S_ADDRESS"],
-            "port": int(os.environ["SERVER_A2S_PORT"]),
+            "address": env("SERVER_A2S_ADDRESS"),
+            "port": int(env("SERVER_A2S_PORT")),
         }
     else:
         config["a2s"] = None
 
+    # RCON
     if env_defined("RCON_ADDRESS") and env_defined("RCON_PORT"):
         config["rcon"] = {
-            "address": os.environ["RCON_ADDRESS"],
-            "port": int(os.environ["RCON_PORT"]),
-            "password": os.environ["RCON_PASSWORD"],
-            "permission": os.environ["RCON_PERMISSION"],
+            "address": env("RCON_ADDRESS"),
+            "port": int(env("RCON_PORT")),
+            "password": env("RCON_PASSWORD"),
+            "permission": env("RCON_PERMISSION"),
         }
     else:
         config["rcon"] = None
 
+    # Game settings
+    game = config["game"]
     if env_defined("GAME_NAME"):
-        config["game"]["name"] = os.environ["GAME_NAME"]
+        game["name"] = env("GAME_NAME")
     if env_defined("GAME_PASSWORD"):
-        config["game"]["password"] = os.environ["GAME_PASSWORD"]
+        game["password"] = env("GAME_PASSWORD")
     if env_defined("GAME_PASSWORD_ADMIN"):
-        config["game"]["passwordAdmin"] = os.environ["GAME_PASSWORD_ADMIN"]
+        game["passwordAdmin"] = env("GAME_PASSWORD_ADMIN")
     else:
-        adminPassword = random_passphrase()
-        config["game"]["passwordAdmin"] = adminPassword
-        print(f"Admin password: {adminPassword}")
+        password = random_passphrase()
+        game["passwordAdmin"] = password
+        print(f"Admin password: {password}")
     if env_defined("GAME_ADMINS"):
-        admins = str(os.environ["GAME_ADMINS"]).split(",")
-        admins[:] = [admin for admin in admins if admin]  # Remove empty items form list
-        config["game"]["admins"] = admins
+        game["admins"] = [a for a in env("GAME_ADMINS").split(",") if a]
     if env_defined("GAME_SCENARIO_ID"):
-        config["game"]["scenarioId"] = os.environ["GAME_SCENARIO_ID"]
+        game["scenarioId"] = env("GAME_SCENARIO_ID")
     if env_defined("GAME_MAX_PLAYERS"):
-        config["game"]["maxPlayers"] = int(os.environ["GAME_MAX_PLAYERS"])
+        game["maxPlayers"] = int(env("GAME_MAX_PLAYERS"))
     if env_defined("GAME_VISIBLE"):
-        config["game"]["visible"] = bool_str(os.environ["GAME_VISIBLE"])
+        game["visible"] = bool_str(env("GAME_VISIBLE"))
     if env_defined("GAME_SUPPORTED_PLATFORMS"):
-        config["game"]["supportedPlatforms"] = os.environ[
-            "GAME_SUPPORTED_PLATFORMS"
-        ].split(",")
-    if env_defined("GAME_PROPS_BATTLEYE"):
-        config["game"]["gameProperties"]["battlEye"] = bool_str(
-            os.environ["GAME_PROPS_BATTLEYE"]
-        )
-    if env_defined("GAME_PROPS_DISABLE_THIRD_PERSON"):
-        config["game"]["gameProperties"]["disableThirdPerson"] = bool_str(
-            os.environ["GAME_PROPS_DISABLE_THIRD_PERSON"]
-        )
-    if env_defined("GAME_PROPS_FAST_VALIDATION"):
-        config["game"]["gameProperties"]["fastValidation"] = bool_str(
-            os.environ["GAME_PROPS_FAST_VALIDATION"]
-        )
-    if env_defined("GAME_PROPS_SERVER_MAX_VIEW_DISTANCE"):
-        config["game"]["gameProperties"]["serverMaxViewDistance"] = int(
-            os.environ["GAME_PROPS_SERVER_MAX_VIEW_DISTANCE"]
-        )
-    if env_defined("GAME_PROPS_SERVER_MIN_GRASS_DISTANCE"):
-        config["game"]["gameProperties"]["serverMinGrassDistance"] = int(
-            os.environ["GAME_PROPS_SERVER_MIN_GRASS_DISTANCE"]
-        )
-    if env_defined("GAME_PROPS_NETWORK_VIEW_DISTANCE"):
-        config["game"]["gameProperties"]["networkViewDistance"] = int(
-            os.environ["GAME_PROPS_NETWORK_VIEW_DISTANCE"]
-        )
-    if env_defined("GAME_PROPS_VON_DISABLE_UI"):
-        config["game"]["gameProperties"]["VONDisableUI"] = bool_str(
-            os.environ["GAME_PROPS_VON_DISABLE_UI"]
-        )
-    if env_defined("GAME_PROPS_VON_DISABLE_DIRECT_SPEECH_UI"):
-        config["game"]["gameProperties"]["VONDisableDirectSpeechUI"] = bool_str(
-            os.environ["GAME_PROPS_VON_DISABLE_DIRECT_SPEECH_UI"]
-        )
-    if env_defined("GAME_PROPS_VON_CAN_TRANSMIT_CROSS_FACTION"):
-        config["game"]["gameProperties"]["VONCanTransmitCrossFaction"] = bool_str(
-            os.environ["GAME_PROPS_VON_CAN_TRANSMIT_CROSS_FACTION"]
-        )
+        game["supportedPlatforms"] = env("GAME_SUPPORTED_PLATFORMS").split(",")
 
-    # Since we want to keep ENVs as a single source of truth
-    # we will regenerate the mod list in case any manual changes were made
-    # also deletes the mod entries when GAME_MODS_IDS_LIST is empty
-    config["game"]["mods"] = []
-    config_mod_ids = []
-    if env_defined("GAME_MODS_IDS_LIST"):
-        reg = re.compile(r"^[A-Z\d,=.]+$")
-        assert reg.match(
-            str(os.environ["GAME_MODS_IDS_LIST"])
-        ), "Illegal characters in GAME_MODS_IDS_LIST env"
-        mods = str(os.environ["GAME_MODS_IDS_LIST"]).split(",")
-        mods[:] = [mod for mod in mods if mod]  # Remove empty items form list
-        reg = re.compile(r"^\d+\.\d+\.\d+$")
-        for mod in mods:
-            mod_details = mod.split("=")
-            assert 0 < len(mod_details) < 3, f"{mod} mod not defined properly"
-            mod_id = mod_details[0]
-            if mod_id in config_mod_ids:
-                continue  # modId already defined in config, skipping to avoid duplicates
-            mod_config = {"modId": mod_id}
-            if len(mod_details) == 2:
-                assert reg.match(
-                    mod_details[1]
-                ), f"{mod} mod version does not match the pattern"
-                mod_config["version"] = mod_details[1]
-            config_mod_ids.append(mod_id)
-            config["game"]["mods"].append(mod_config)
-    if env_defined("GAME_MODS_JSON_FILE_PATH"):
-        with open(os.environ["GAME_MODS_JSON_FILE_PATH"]) as f:
-            json_mods = json.load(f)
-            allowed_keys = ["modId", "name", "version"]
-            for provided_mod in json_mods:
-                assert (
-                    "modId" in provided_mod
-                ), f"Entry in GAME_MODS_JSON_FILE_PATH file does not contain modId: {provided_mod}"
-                if provided_mod["modId"] in config_mod_ids:
-                    continue  # modId already defined in config, skipping to avoid duplicates
-                valid_mod = {
-                    key: provided_mod[key]
-                    for key in allowed_keys
-                    if key in provided_mod
-                }  # Extract only valid config keys
-                config_mod_ids.append(provided_mod["modId"])
-                config["game"]["mods"].append(valid_mod)
+    # Game properties — map env vars to config keys with their type converters
+    props = game["gameProperties"]
+    prop_map = {
+        "GAME_PROPS_BATTLEYE": ("battlEye", bool_str),
+        "GAME_PROPS_DISABLE_THIRD_PERSON": ("disableThirdPerson", bool_str),
+        "GAME_PROPS_FAST_VALIDATION": ("fastValidation", bool_str),
+        "GAME_PROPS_SERVER_MAX_VIEW_DISTANCE": ("serverMaxViewDistance", int),
+        "GAME_PROPS_SERVER_MIN_GRASS_DISTANCE": ("serverMinGrassDistance", int),
+        "GAME_PROPS_NETWORK_VIEW_DISTANCE": ("networkViewDistance", int),
+        "GAME_PROPS_VON_DISABLE_UI": ("VONDisableUI", bool_str),
+        "GAME_PROPS_VON_DISABLE_DIRECT_SPEECH_UI": ("VONDisableDirectSpeechUI", bool_str),
+        "GAME_PROPS_VON_CAN_TRANSMIT_CROSS_FACTION": ("VONCanTransmitCrossFaction", bool_str),
+    }
+    for env_key, (config_key, convert) in prop_map.items():
+        if env_defined(env_key):
+            props[config_key] = convert(env(env_key))
 
-    f = open(CONFIG_GENERATED, "w")
-    json.dump(config, f, indent=4)
-    f.close()
+    # Mods (always regenerated from env to keep it as single source of truth)
+    parse_mods(game)
 
-    config_path = CONFIG_GENERATED
 
-launch = [
-    os.environ["ARMA_BINARY"],
-    "-config",
-    config_path,
-    "-backendlog",
-    "-nothrow",
-    "-maxFPS",
-    os.environ["ARMA_MAX_FPS"],
-    "-profile",
-    os.environ["ARMA_PROFILE"],
-    "-addonDownloadDir",
-    os.environ["ARMA_WORKSHOP_DIR"],
-    "-addonsDir",
-    os.environ["ARMA_WORKSHOP_DIR"],
-    *shlex.split(os.environ["ARMA_PARAMS"]),
-]
+def generate_config():
+    """Generate server config from env vars and return the config file path."""
+    if env("ARMA_CONFIG") != "docker_generated":
+        return f"/reforger/Configs/{env('ARMA_CONFIG')}"
 
-print(shlex.join(launch), flush=True)
+    config = load_config()
+    apply_env_to_config(config)
 
-proc = subprocess.Popen(launch)
+    with open(CONFIG_GENERATED, "w") as f:
+        json.dump(config, f, indent=4)
 
-try:
+    return CONFIG_GENERATED
+
+
+def main():
+    install_server()
+    config_path = generate_config()
+
+    launch = [
+        env("ARMA_BINARY"),
+        "-config", config_path,
+        "-backendlog",
+        "-nothrow",
+        "-maxFPS", env("ARMA_MAX_FPS"),
+        "-profile", env("ARMA_PROFILE"),
+        "-addonDownloadDir", env("ARMA_WORKSHOP_DIR"),
+        "-addonsDir", env("ARMA_WORKSHOP_DIR"),
+        *shlex.split(env("ARMA_PARAMS")),
+    ]
+
+    print(shlex.join(launch), flush=True)
+
+    proc = subprocess.Popen(launch)
     try:
-        sys.exit(proc.wait())
-    except KeyboardInterrupt:
-        proc.send_signal(signal.SIGINT)
-        sys.exit(proc.wait())
-except SystemExit:
-    raise
-except BaseException:
-    proc.kill()
-    raise
+        try:
+            sys.exit(proc.wait())
+        except KeyboardInterrupt:
+            proc.send_signal(signal.SIGINT)
+            sys.exit(proc.wait())
+    except SystemExit:
+        raise
+    except BaseException:
+        proc.kill()
+        raise
+
+
+if __name__ == "__main__":
+    main()

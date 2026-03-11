@@ -17,8 +17,6 @@ RUN apt-get update \
         libssl1.1 \
         wamerican \
     && \
-    apt-get remove --purge -y \
-    && \
     apt-get clean autoclean \
     && \
     apt-get autoremove -y \
@@ -86,6 +84,7 @@ VOLUME /reforger/workshop
 
 EXPOSE 2001/udp
 EXPOSE 17777/udp
+EXPOSE 19999/udp
 
 STOPSIGNAL SIGINT
 
