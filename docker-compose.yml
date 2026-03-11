@@ -9,7 +9,10 @@ services:
       - "17777:17777/udp"
       - "19999:19999/udp"  # RCON
     volumes:
+      - ./docker_default.json:/reforger/Configs/server.json:ro
       - ./reforger/configs:/reforger/Configs
       - ./reforger/profile:/home/profile
       - ./reforger/workshop:/reforger/workshop
+    environment:
+      - ARMA_CONFIG=server.json
 
