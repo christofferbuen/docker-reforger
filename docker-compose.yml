@@ -1,7 +1,7 @@
 ---
 services:
   arma-reforger:
-    image: ghcr.io/acemod/arma-reforger:latest
+    build: .
     platform: linux/amd64
     container_name: arma-reforger
     ports:
