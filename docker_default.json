@@ -28,7 +28,7 @@
 		],
 		"gameProperties": {
 			"serverMaxViewDistance": 1600,
-			"serverMinGrassDistance": 0,
+			"serverMinGrassDistance": 50,
 			"networkViewDistance": 1500,
 			"disableThirdPerson": false,
 			"fastValidation": true,
