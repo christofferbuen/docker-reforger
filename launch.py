@@ -58,10 +58,11 @@ def install_server():
     app_id = env("STEAM_APPID")
     sentinel = Path(SENTINEL_WINDOWS_FIX)
 
+    # Warm-up login so steamcmd caches its configuration
+    subprocess.call(["/steamcmd/steamcmd.sh", "+login", "anonymous", "+quit"])
+
     if app_id == "1890870":
-        # Experimental appId needs a one-time Windows platform pass to work
-        # around a bug. On subsequent launches just do the normal Linux update.
-        subprocess.call(["/steamcmd/steamcmd.sh", "+login", "anonymous", "+quit"])
+        # Experimental appId needs a one-time Windows platform pass
         if not sentinel.exists():
             subprocess.call(build_steamcmd_args(platform="windows"))
             sentinel.touch()
@@ -224,6 +225,12 @@ def main():
     ]
 
     print(shlex.join(launch), flush=True)
+
+    binary = Path(env("ARMA_BINARY"))
+    if not binary.exists():
+        print(f"ERROR: Server binary not found: {binary}", flush=True)
+        print("steamcmd may have failed to install. Check logs above.", flush=True)
+        sys.exit(1)
 
     proc = subprocess.Popen(launch)
     try:
