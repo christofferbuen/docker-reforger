@@ -10,9 +10,15 @@ services:
       - "19999:19999/udp"  # RCON
     volumes:
       - ./docker_default.json:/reforger/Configs/server.json:ro
+      - steamcmd:/steamcmd
+      - reforger:/reforger
       - ./reforger/configs:/reforger/Configs
       - ./reforger/profile:/home/profile
       - ./reforger/workshop:/reforger/workshop
     environment:
       - ARMA_CONFIG=server.json
+
+volumes:
+  steamcmd:
+  reforger:
 
